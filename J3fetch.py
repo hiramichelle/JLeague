@@ -94,7 +94,7 @@ def fetch_section(
     sess = session or requests
     resp = sess.get(BASE_URL, params=params, headers=REQUEST_HEADERS, timeout=15)
     resp.raise_for_status()
-    resp.encoding = resp.apparent_encoding or "utf-8"
+    resp.encoding = "utf-8"
 
     tree = lxml_html.fromstring(resp.text)
 
