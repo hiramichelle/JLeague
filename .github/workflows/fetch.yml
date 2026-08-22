@@ -1,0 +1,26 @@
+name: J-League データ取得
+
+on:
+  schedule:
+    # UTC基準。6,10,14,18,22,26(=翌2時) JSTの1日6回実行(必要に応じて調整してください)
+    - cron: "0 3,7,11,13,17,21 * * *"
+  workflow_dispatch: {}  # GitHubの画面から手動実行も可能にする
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 依存パッケージのインストール
+        run: pip install requests lxml supabase
+
+      - name: データ取得 & Supabaseへupsert
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python J3fetch.py
