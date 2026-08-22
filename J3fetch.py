@@ -59,6 +59,9 @@ class MatchRow:
     home_team: Optional[str] = None
     home_team_url: Optional[str] = None
     score: Optional[str] = None
+    home_score: Optional[int] = None
+    away_score: Optional[int] = None
+    is_finished: bool = False
     match_card_id: Optional[str] = None
     match_url: Optional[str] = None
     away_team: Optional[str] = None
@@ -66,6 +69,18 @@ class MatchRow:
     stadium: Optional[str] = None
     attendance: Optional[str] = None
     broadcast: Optional[str] = None
+
+
+def parse_score(score_text: str) -> tuple[Optional[int], Optional[int], bool]:
+    """'1-0' のようなスコア文字列を (home_score, away_score, is_finished) に分解する。
+    'vs' 等の未消化表記の場合は (None, None, False) を返す。
+    """
+    import re
+
+    m = re.match(r"^(\d+)-(\d+)$", score_text.strip())
+    if not m:
+        return None, None, False
+    return int(m.group(1)), int(m.group(2)), True
 
 
 def make_match_key(match_date: str, home_team: str, away_team: str) -> str:
@@ -94,7 +109,7 @@ def fetch_section(
     sess = session or requests
     resp = sess.get(BASE_URL, params=params, headers=REQUEST_HEADERS, timeout=15)
     resp.raise_for_status()
-    resp.encoding = "utf-8"
+    resp.encoding = resp.apparent_encoding or "utf-8"
 
     tree = lxml_html.fromstring(resp.text)
 
@@ -128,6 +143,7 @@ def fetch_section(
         match_date = cell_text(3)
         home_team = cell_text(5)
         away_team = cell_text(7)
+        home_score, away_score, is_finished = parse_score(score_text)
 
         row = MatchRow(
             match_key=make_match_key(match_date, home_team, away_team),
@@ -139,6 +155,9 @@ def fetch_section(
             home_team=home_team,
             home_team_url=cell_link(5),
             score=score_text,
+            home_score=home_score,
+            away_score=away_score,
+            is_finished=is_finished,
             match_card_id=match_card_id,
             match_url=match_url,
             away_team=away_team,
