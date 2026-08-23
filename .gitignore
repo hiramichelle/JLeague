@@ -1,0 +1,14 @@
+# Secrets (絶対にコミットしない)
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 取得したローカルJSON(参考用に残す場合は個別に除外解除してもOK)
+*.json
+
+# macOS
+.DS_Store
