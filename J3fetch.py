@@ -2,11 +2,18 @@
 J-League データサイト (data.j-league.or.jp) から
 「日程・結果」テーブルを取得し、Supabaseにupsertするスクリプト。
 
+【改訂ポイント】
+competition_years + competition_frame_ids のみで
+シーズン全節分を1リクエストで取得できることが判明したため、
+以前の competition_section_ids ループは廃止した。
+これにより大会(J1/J2/J3)ごとに1リクエストで済み、
+サイトへの負荷もリクエスト数も大幅に削減される。
+
 GitHub Actions等での定期実行を想定 (ローカル環境の起動状態に依存しない運用)。
 
 必要な環境変数:
-    SUPABASE_URL       : SupabaseプロジェクトのURL
-    SUPABASE_KEY        : Supabase の service_role キー (RLSを使う場合はそれに応じたキー)
+    SUPABASE_URL
+    SUPABASE_KEY   (service_role key。書き込み権限が必要)
 
 必要なライブラリ:
     pip install requests lxml supabase
@@ -41,11 +48,17 @@ REQUEST_HEADERS = {
 REQUEST_INTERVAL_SEC = 1.5
 
 COMPETITION_YEARS = 2026
-COMPETITION_FRAME_IDS = 3
-COMPETITION_IDS = 730
 
-# J3 全節 (6500は欠番)
-TARGET_SECTION_IDS = list(range(6468, 6500)) + list(range(6501, 6506))
+# 大会一覧: competition_frame_ids が分かれば競技全体を1リクエストで取得できる。
+# 大会名(J1/J2/J3等)はレスポンス内の「大会」列からそのまま取得するため、
+# ここでは frame_id とログ用ラベルだけ持たせる。
+# 百年構想リーグ(frame_ids=11)や他大会(frame_ids=40)を追加したくなったら
+# この配列に行を足すだけでよい。
+TARGETS = [
+    {"label": "J1", "competition_frame_ids": 1},
+    {"label": "J2", "competition_frame_ids": 2},
+    {"label": "J3", "competition_frame_ids": 3},
+]
 
 
 @dataclass
@@ -71,6 +84,12 @@ class MatchRow:
     broadcast: Optional[str] = None
 
 
+def make_match_key(match_date: str, home_team: str, away_team: str) -> str:
+    """試合日+ホーム+アウェイから一意キーを生成する(match_card_idが未確定の試合でも一意に定まる)。"""
+    raw = f"{match_date}|{home_team}|{away_team}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
 def parse_score(score_text: str) -> tuple[Optional[int], Optional[int], bool]:
     """'1-0' のようなスコア文字列を (home_score, away_score, is_finished) に分解する。
     'vs' 等の未消化表記の場合は (None, None, False) を返す。
@@ -83,31 +102,24 @@ def parse_score(score_text: str) -> tuple[Optional[int], Optional[int], bool]:
     return int(m.group(1)), int(m.group(2)), True
 
 
-def make_match_key(match_date: str, home_team: str, away_team: str) -> str:
-    """試合日+ホーム+アウェイから一意キーを生成する(match_card_idが未確定の試合でも一意に定まる)。"""
-    raw = f"{match_date}|{home_team}|{away_team}"
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
-
-
 # ─────────────────────────────────────────
 # 取得処理
 # ─────────────────────────────────────────
 
-def fetch_section(
-    section_id: int,
+def fetch_competition(
+    competition_frame_ids: int,
+    competition_years: int = COMPETITION_YEARS,
     session: Optional[requests.Session] = None,
 ) -> list[dict]:
-    """指定した節(competition_section_ids)1つ分のテーブルを取得して辞書リストで返す。"""
+    """指定した大会(competition_frame_ids)のシーズン全節分を1リクエストで取得する。"""
 
     params = {
-        "competition_years": COMPETITION_YEARS,
-        "competition_frame_ids": COMPETITION_FRAME_IDS,
-        "competition_ids": COMPETITION_IDS,
-        "competition_section_ids": section_id,
+        "competition_years": competition_years,
+        "competition_frame_ids": competition_frame_ids,
     }
 
     sess = session or requests
-    resp = sess.get(BASE_URL, params=params, headers=REQUEST_HEADERS, timeout=15)
+    resp = sess.get(BASE_URL, params=params, headers=REQUEST_HEADERS, timeout=30)
     resp.raise_for_status()
     resp.encoding = "utf-8"
 
@@ -117,8 +129,7 @@ def fetch_section(
     tbody = tree.xpath(BODY_XPATH)
 
     if not thead or not tbody:
-        # 該当節がまだ存在しない/空のケースはエラーにせずスキップ
-        print(f"section_id={section_id}: テーブルが見つかりません。スキップします。")
+        print(f"competition_frame_ids={competition_frame_ids}: テーブルが見つかりません。スキップします。")
         return []
 
     rows: list[dict] = []
@@ -171,15 +182,14 @@ def fetch_section(
     return rows
 
 
-def fetch_sections(section_ids: list[int]) -> list[dict]:
+def fetch_all_targets() -> list[dict]:
     all_rows: list[dict] = []
     with requests.Session() as sess:
-        for i, sid in enumerate(section_ids):
-            rows = fetch_section(sid, session=sess)
-            if rows:
-                print(f"section_id={sid}: {len(rows)}件 取得")
+        for i, target in enumerate(TARGETS):
+            rows = fetch_competition(target["competition_frame_ids"], session=sess)
+            print(f"{target['label']}: {len(rows)}件 取得")
             all_rows.extend(rows)
-            if i < len(section_ids) - 1:
+            if i < len(TARGETS) - 1:
                 time.sleep(REQUEST_INTERVAL_SEC)
     return all_rows
 
@@ -195,7 +205,6 @@ def upsert_to_supabase(rows: list[dict]) -> None:
     key = os.environ["SUPABASE_KEY"]
     client = create_client(url, key)
 
-    # 大量件数を一度に投げず、チャンクに分けて安全側に倒す
     chunk_size = 200
     for i in range(0, len(rows), chunk_size):
         chunk = rows[i : i + chunk_size]
@@ -208,7 +217,7 @@ def upsert_to_supabase(rows: list[dict]) -> None:
 # ─────────────────────────────────────────
 
 if __name__ == "__main__":
-    data = fetch_sections(TARGET_SECTION_IDS)
+    data = fetch_all_targets()
     print(f"\n合計 {len(data)} 試合を取得しました。")
 
     if not data:
