@@ -61,6 +61,13 @@ def load_recent_form() -> pd.DataFrame:
     return pd.DataFrame(res.data)
 
 
+@st.cache_data(ttl=300)
+def load_home_away_splits() -> pd.DataFrame:
+    client = get_client()
+    res = client.table("home_away_splits").select("*").execute()
+    return pd.DataFrame(res.data)
+
+
 FORM_BADGE = {"W": "🟢", "D": "⚪", "L": "🔴"}
 
 
@@ -83,6 +90,7 @@ def minmax_normalize(series: pd.Series) -> pd.Series:
 
 standings_df = load_standings()
 form_df = load_recent_form()
+home_away_df = load_home_away_splits()
 
 if standings_df.empty:
     st.warning("standings データが空です。Supabase側のデータ取得・VIEW作成が完了しているか確認してください。")
@@ -116,12 +124,13 @@ st.sidebar.subheader("重み設定")
 w_points = st.sidebar.slider("勝点(順位)の重み", 0.0, 1.0, 0.4, 0.05)
 w_goal_diff = st.sidebar.slider("得失点差の重み", 0.0, 1.0, 0.25, 0.05)
 w_form = st.sidebar.slider("直近5試合フォームの重み", 0.0, 1.0, 0.25, 0.05)
-home_advantage = st.sidebar.slider("ホームアドバンテージ", 0.0, 0.5, 0.1, 0.05)
+w_home_away = st.sidebar.slider("ホーム/アウェイ実績の重み", 0.0, 1.0, 0.2, 0.05)
+home_advantage = st.sidebar.slider("ホームアドバンテージ(一律加点)", 0.0, 0.5, 0.1, 0.05)
 draw_factor = st.sidebar.slider("引き分けの出やすさ", 0.0, 1.0, 0.35, 0.05)
 
 st.sidebar.caption(
-    "各重みは特徴量への配分です。合計が1.0でなくても動作しますが、"
-    "比率として解釈されるので概ね合計1.0前後を推奨します。"
+    "「ホーム/アウェイ実績の重み」はチームごとの実際のホーム勝率・アウェイ勝率を反映します。"
+    "「ホームアドバンテージ」は全チーム共通の一律加点です。"
 )
 
 # ─────────────────────────────────────────
@@ -156,12 +165,18 @@ st.subheader("直近5試合トレンド")
 col_home, col_away = st.columns(2)
 
 
-def render_team_form_panel(container, team_name: str, label: str):
+def render_team_form_panel(container, team_name: str, label: str, is_home: bool):
     row_standing = scoped[scoped["team"] == team_name]
     row_form = form_df[
         (form_df["team"] == team_name)
         & (form_df["season"] == season)
         & (form_df["competition"] == competition)
+    ]
+    row_ha = home_away_df[
+        (home_away_df["team"] == team_name)
+        & (home_away_df["season"] == season)
+        & (home_away_df["competition"] == competition)
+        & (home_away_df["is_home"] == is_home)
     ]
 
     with container:
@@ -179,9 +194,19 @@ def render_team_form_panel(container, team_name: str, label: str):
         else:
             st.write("直近試合データなし")
 
+        ha_label = "ホーム" if is_home else "アウェイ"
+        if not row_ha.empty and pd.notna(row_ha.iloc[0]["win_rate_pct"]):
+            h = row_ha.iloc[0]
+            st.write(
+                f"{ha_label}成績: {int(h['played'])}試合 勝率{h['win_rate_pct']}% "
+                f"(平均得点{h['avg_goals_for']} / 平均失点{h['avg_goals_against']})"
+            )
+        else:
+            st.write(f"{ha_label}成績データなし")
 
-render_team_form_panel(col_home, home_team, "ホーム")
-render_team_form_panel(col_away, away_team, "アウェイ")
+
+render_team_form_panel(col_home, home_team, "ホーム", is_home=True)
+render_team_form_panel(col_away, away_team, "アウェイ", is_home=False)
 
 # ─────────────────────────────────────────
 # 予測ロジック
@@ -205,6 +230,15 @@ else:
     )
     norm_form = minmax_normalize(recent_points_series)
 
+    # ホーム/アウェイ別の勝率を正規化 (母集団は「ホームでの記録」「アウェイでの記録」それぞれ)
+    ha_scoped = home_away_df[
+        (home_away_df["season"] == season) & (home_away_df["competition"] == competition)
+    ]
+    home_win_rate = ha_scoped[ha_scoped["is_home"] == True].set_index("team")["win_rate_pct"]  # noqa: E712
+    away_win_rate = ha_scoped[ha_scoped["is_home"] == False].set_index("team")["win_rate_pct"]  # noqa: E712
+    norm_home_win_rate = minmax_normalize(home_win_rate.reindex(scoped["team"]).fillna(home_win_rate.median()))
+    norm_away_win_rate = minmax_normalize(away_win_rate.reindex(scoped["team"]).fillna(away_win_rate.median()))
+
     def team_score(team_name: str, is_home: bool) -> float:
         score = (
             w_points * norm_points.get(team_name, 0.5)
@@ -212,7 +246,10 @@ else:
             + w_form * norm_form.get(team_name, 0.5)
         )
         if is_home:
+            score += w_home_away * norm_home_win_rate.get(team_name, 0.5)
             score += home_advantage
+        else:
+            score += w_home_away * norm_away_win_rate.get(team_name, 0.5)
         return score
 
     score_home = team_score(home_team, is_home=True)
@@ -244,6 +281,6 @@ else:
         st.write(f"{home_team} スコア: {score_home:.3f} (ホームアドバンテージ込み)")
         st.write(f"{away_team} スコア: {score_away:.3f}")
         st.caption(
-            "スコアは「勝点・得失点差・直近フォーム」をリーグ内で0〜1に正規化し、"
+            "スコアは「勝点・得失点差・直近フォーム・ホーム/アウェイでの実績」をリーグ内で0〜1に正規化し、"
             "サイドバーの重みで加重平均したものです。あくまで簡易的なヒューリスティックモデルです。"
         )
