@@ -1,9 +1,13 @@
+# このファイルはリポジトリの .github/workflows/fetch.yml に配置してください
+
 name: J-League データ取得
 
 on:
   schedule:
-    # UTC基準。6,10,14,18,22,26(=翌2時) JSTの1日6回実行(必要に応じて調整してください)
-    - cron: "0 3,7,11,13,17,21 * * *"
+    # 平日(月〜金, UTC曜日1-5): JST 12:00 と 20:00 の1日2回
+    - cron: "0 3,11 * * 1-5"
+    # 土日(UTC曜日0,6): JST 12:00〜22:00 まで毎時実行(試合開始前後をカバー)
+    - cron: "0 3-13 * * 0,6"
   workflow_dispatch: {}  # GitHubの画面から手動実行も可能にする
 
 jobs:
@@ -19,8 +23,14 @@ jobs:
       - name: 依存パッケージのインストール
         run: pip install requests lxml supabase
 
-      - name: データ取得 & Supabaseへupsert
+      - name: 日程・結果データ取得 & Supabaseへupsert
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python J3fetch.py
+
+      - name: チーム別集計データ取得 & Supabaseへupsert
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python SFRT08fetch.py
