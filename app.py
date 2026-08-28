@@ -68,6 +68,13 @@ def load_home_away_splits() -> pd.DataFrame:
     return pd.DataFrame(res.data)
 
 
+@st.cache_data(ttl=300)
+def load_team_season_stats() -> pd.DataFrame:
+    client = get_client()
+    res = client.table("team_season_stats_joined").select("*").execute()
+    return pd.DataFrame(res.data)
+
+
 FORM_BADGE = {"W": "🟢", "D": "⚪", "L": "🔴"}
 
 
@@ -91,6 +98,7 @@ def minmax_normalize(series: pd.Series) -> pd.Series:
 standings_df = load_standings()
 form_df = load_recent_form()
 home_away_df = load_home_away_splits()
+stats_df = load_team_season_stats()
 
 if standings_df.empty:
     st.warning("standings データが空です。Supabase側のデータ取得・VIEW作成が完了しているか確認してください。")
@@ -207,6 +215,39 @@ def render_team_form_panel(container, team_name: str, label: str, is_home: bool)
 
 render_team_form_panel(col_home, home_team, "ホーム", is_home=True)
 render_team_form_panel(col_away, away_team, "アウェイ", is_home=False)
+
+# ─────────────────────────────────────────
+# チーム別集計結果 (SFRT08データ)
+# ─────────────────────────────────────────
+
+st.subheader("チーム別集計結果")
+
+col_home_stats, col_away_stats = st.columns(2)
+
+
+def render_team_stats_panel(container, team_name: str, label: str):
+    row_stats = stats_df[
+        (stats_df["short_name"] == team_name)
+        & (stats_df["season"] == season)
+        & (stats_df["competition"] == competition)
+    ]
+
+    with container:
+        st.markdown(f"**{label}: {team_name}**")
+        if not row_stats.empty and pd.notna(row_stats.iloc[0]["played"]):
+            s = row_stats.iloc[0]
+            st.write(f"試合数: {int(s['played'])}")
+            st.write(f"一試合平均得点: {s['avg_goals_per_match']:.2f}")
+            if pd.notna(s["shot_conversion_pct"]):
+                st.write(f"得点率: {s['shot_conversion_pct']:.1f}%")
+            if pd.notna(s["opponent_conversion_pct"]):
+                st.write(f"失点率: {s['opponent_conversion_pct']:.1f}%")
+        else:
+            st.write("統計データなし")
+
+
+render_team_stats_panel(col_home_stats, home_team, "ホーム")
+render_team_stats_panel(col_away_stats, away_team, "アウェイ")
 
 # ─────────────────────────────────────────
 # 予測ロジック
