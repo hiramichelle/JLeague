@@ -4,3 +4,4 @@ supabase==2.31.0
 supabase-auth==2.31.0
 supabase-functions==2.31.0
 streamlit-shadcn-ui==1.1.0
+plotly==5.24.1

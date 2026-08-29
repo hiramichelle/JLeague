@@ -27,6 +27,7 @@ from __future__ import annotations
 import math
 
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 from supabase import create_client
 
@@ -86,6 +87,13 @@ def load_jleague_matches() -> pd.DataFrame:
     return df
 
 
+@st.cache_data(ttl=300)
+def load_section_standings() -> pd.DataFrame:
+    client = get_client()
+    res = client.table("team_section_standings").select("*").execute()
+    return pd.DataFrame(res.data)
+
+
 FORM_BADGE = {"W": "🟢", "D": "⚪", "L": "🔴"}
 
 
@@ -110,6 +118,7 @@ standings_df = load_standings()
 form_df = load_recent_form()
 home_away_df = load_home_away_splits()
 stats_df = load_team_season_stats()
+section_standings_df = load_section_standings()
 
 # jleague_matchesの取得
 try:
@@ -281,6 +290,35 @@ def render_team_form_panel(container, team_name: str, label: str, is_home: bool)
 
 render_team_form_panel(col_home, home_team, "ホーム", is_home=True)
 render_team_form_panel(col_away, away_team, "アウェイ", is_home=False)
+
+# ─────────────────────────────────────────
+# メイン: 順位変動グラフ
+# ─────────────────────────────────────────
+
+st.subheader("順位変動")
+
+progress_scoped = section_standings_df[
+    (section_standings_df["season"] == season)
+    & (section_standings_df["competition"] == competition)
+    & (section_standings_df["team"].isin([home_team, away_team]))
+].sort_values(["team", "section_no"])
+
+if progress_scoped.empty:
+    st.write("順位変動データがありません")
+else:
+    fig = px.line(
+        progress_scoped,
+        x="section_no",
+        y="position",
+        color="team",
+        markers=True,
+        labels={"section_no": "節", "position": "順位", "team": "チーム"},
+    )
+    # 順位は数値が小さいほど上位なので、Y軸を反転させて「上が1位」になるようにする
+    max_position = int(progress_scoped["position"].max())
+    fig.update_yaxes(autorange="reversed", dtick=1, range=[max_position + 0.5, 0.5])
+    fig.update_xaxes(dtick=1)
+    st.plotly_chart(fig, use_container_width=True)
 
 # ─────────────────────────────────────────
 # チーム別集計結果 (SFRT08データ)
