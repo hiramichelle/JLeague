@@ -110,18 +110,30 @@ standings_df = load_standings()
 form_df = load_recent_form()
 home_away_df = load_home_away_splits()
 stats_df = load_team_season_stats()
-jleague_matches = load_jleague_matches()
 
-# 列名の確認・修正（Supabaseの列名が期待と異なる場合に対応）
-if jleague_matches is not None and not jleague_matches.empty:
-    # 必要な列が存在するか確認
-    required_cols = ["season", "competition", "section", "home_team", "away_team"]
-    missing_cols = [col for col in required_cols if col not in jleague_matches.columns]
-    if missing_cols:
-        st.error(f"jleague_matchesテーブルに必要な列が不足しています: {missing_cols}")
-        st.stop()
-else:
-    st.error("試合データが取得できませんでした")
+# jleague_matchesの取得
+try:
+    jleague_matches = load_jleague_matches()
+except Exception as e:
+    st.error(f"試合データ取得エラー: {e}")
+    st.stop()
+
+# 列名の確認・修正
+if jleague_matches is None:
+    st.error("jleague_matchesがNoneです")
+    st.stop()
+
+if jleague_matches.empty:
+    st.error(f"jleague_matchesが空です。Supabaseのjleague_matchesテーブルにデータがあるか確認してください。")
+    st.write(f"取得されたデータ: {jleague_matches}")
+    st.stop()
+
+# 必要な列が存在するか確認
+required_cols = ["season", "competition", "section", "home_team", "away_team"]
+missing_cols = [col for col in required_cols if col not in jleague_matches.columns]
+if missing_cols:
+    st.error(f"jleague_matchesテーブルに必要な列が不足しています: {missing_cols}")
+    st.write(f"実際の列: {jleague_matches.columns.tolist()}")
     st.stop()
 
 if standings_df.empty:
