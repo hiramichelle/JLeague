@@ -161,28 +161,27 @@ if matches_scoped.empty:
     st.error(f"{season} {competition}の試合データがありません")
     st.stop()
 
-# 節選択
-try:
-    # sectionをInteger型に変換して数値順でソート(例: "第1節" → 1)
-    section_list = sorted(matches_scoped["section"].unique())
-except Exception:
-    section_list = sorted(matches_scoped["section"].unique())
+# ホームチーム選択(この大会でホームを一度でも務めた全チームが対象)
+home_teams = sorted(matches_scoped["home_team"].unique())
+home_team = st.sidebar.selectbox("ホームチーム", home_teams)
 
-section = st.sidebar.selectbox("節", section_list)
+# 選択したチームがホームだった試合に絞り込み
+team_home_matches = matches_scoped[matches_scoped["home_team"] == home_team]
 
-# その節の試合一覧
-section_matches = matches_scoped[matches_scoped["section"] == section]
-
-if section_matches.empty:
+if team_home_matches.empty:
     st.sidebar.warning("該当試合がありません")
     st.stop()
 
-# ホームチーム選択
-home_teams = sorted(section_matches["home_team"].unique())
-home_team = st.sidebar.selectbox("ホームチーム", home_teams)
+# 節選択(このチームがホームだった節のみが選択肢になる)
+try:
+    section_list = sorted(team_home_matches["section"].unique())
+except Exception:
+    section_list = sorted(team_home_matches["section"].unique())
 
-# アウェイ自動セット
-match_row = section_matches[section_matches["home_team"] == home_team]
+section = st.sidebar.selectbox("節", section_list)
+
+# その節・そのホームチームの試合を特定
+match_row = team_home_matches[team_home_matches["section"] == section]
 if match_row.empty:
     st.sidebar.error("該当試合が見つかりません")
     st.stop()
