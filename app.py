@@ -276,15 +276,15 @@ def render_score_cards(team_name: str, label: str):
     st.markdown(f"**{label}: {team_name}**")
     cols = st.columns(5)
     with cols[0]:
-        ui.metric_card(title="現在順位", content=position_value, key=f"card_position_{label}")
+        ui.card(title="現在順位", content=position_value, key=f"card_position_{label}").render()
     with cols[1]:
-        ui.metric_card(title="総得点", content=goals_for_value, key=f"card_gf_{label}")
+        ui.card(title="総得点", content=goals_for_value, key=f"card_gf_{label}").render()
     with cols[2]:
-        ui.metric_card(title="総失点", content=goals_against_value, key=f"card_ga_{label}")
+        ui.card(title="総失点", content=goals_against_value, key=f"card_ga_{label}").render()
     with cols[3]:
-        ui.metric_card(title="得点率", content=scoring_rate_value, description="得点/シュート数", key=f"card_scoring_{label}")
+        ui.card(title="得点率", content=scoring_rate_value, description="得点/シュート数", key=f"card_scoring_{label}").render()
     with cols[4]:
-        ui.metric_card(title="失点率", content=conceding_rate_value, description="失点/被シュート数", key=f"card_conceding_{label}")
+        ui.card(title="失点率", content=conceding_rate_value, description="失点/被シュート数", key=f"card_conceding_{label}").render()
 
 
 render_score_cards(home_team, "ホーム")
