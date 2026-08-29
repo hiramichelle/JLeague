@@ -75,6 +75,13 @@ def load_team_season_stats() -> pd.DataFrame:
     return pd.DataFrame(res.data)
 
 
+@st.cache_data(ttl=300)
+def load_jleague_matches() -> pd.DataFrame:
+    client = get_client()
+    res = client.table("jleague_matches").select("*").execute()
+    return pd.DataFrame(res.data)
+
+
 FORM_BADGE = {"W": "🟢", "D": "⚪", "L": "🔴"}
 
 
@@ -99,6 +106,7 @@ standings_df = load_standings()
 form_df = load_recent_form()
 home_away_df = load_home_away_splits()
 stats_df = load_team_season_stats()
+jleague_matches = load_jleague_matches()
 
 if standings_df.empty:
     st.warning("standings データが空です。Supabase側のデータ取得・VIEW作成が完了しているか確認してください。")
@@ -115,17 +123,44 @@ competition = st.sidebar.selectbox(
     "大会", sorted(standings_df[standings_df["season"] == season]["competition"].unique())
 )
 
-scoped = standings_df[
-    (standings_df["season"] == season) & (standings_df["competition"] == competition)
-].sort_values("position")
+# 該当シーズン・大会の試合データを絞り込み
+matches_scoped = jleague_matches[
+    (jleague_matches["season"] == season) & 
+    (jleague_matches["competition"] == competition)
+]
 
-team_list = scoped["team"].tolist()
+if matches_scoped.empty:
+    st.error(f"{season} {competition}の試合データがありません")
+    st.stop()
 
-st.sidebar.divider()
-home_team = st.sidebar.selectbox("ホームチーム", team_list, index=0)
-away_team = st.sidebar.selectbox(
-    "アウェイチーム", team_list, index=min(1, len(team_list) - 1)
-)
+# 節選択
+try:
+    # sectionをInteger型に変換して数値順でソート(例: "第1節" → 1)
+    section_list = sorted(matches_scoped["section"].unique())
+except Exception:
+    section_list = sorted(matches_scoped["section"].unique())
+
+section = st.sidebar.selectbox("節", section_list)
+
+# その節の試合一覧
+section_matches = matches_scoped[matches_scoped["section"] == section]
+
+if section_matches.empty:
+    st.sidebar.warning("該当試合がありません")
+    st.stop()
+
+# ホームチーム選択
+home_teams = sorted(section_matches["home_team"].unique())
+home_team = st.sidebar.selectbox("ホームチーム", home_teams)
+
+# アウェイ自動セット
+match_row = section_matches[section_matches["home_team"] == home_team]
+if match_row.empty:
+    st.sidebar.error("該当試合が見つかりません")
+    st.stop()
+
+away_team = match_row.iloc[0]["away_team"]
+st.sidebar.markdown(f"**アウェイ: {away_team}**")
 
 st.sidebar.divider()
 st.sidebar.subheader("重み設定")
@@ -144,6 +179,10 @@ st.sidebar.caption(
 # ─────────────────────────────────────────
 # メイン: 順位表
 # ─────────────────────────────────────────
+
+scoped = standings_df[
+    (standings_df["season"] == season) & (standings_df["competition"] == competition)
+].sort_values("position")
 
 st.title("⚽ J-League 勝敗予想ツール")
 st.caption(f"{season}シーズン {competition}")
