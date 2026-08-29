@@ -237,7 +237,7 @@ st.dataframe(
         "goal_diff": "得失点差", "points": "勝点",
     }),
     hide_index=True,
-    use_container_width=True,
+    width='stretch',
 )
 
 # ─────────────────────────────────────────
@@ -276,15 +276,15 @@ def render_score_cards(team_name: str, label: str):
     st.markdown(f"**{label}: {team_name}**")
     cols = st.columns(5)
     with cols[0]:
-        ui.card(title="現在順位", content=position_value, key=f"card_position_{label}").render()
+        ui.card(title="現在順位", content=position_value, key=f"card_position_{label}")
     with cols[1]:
-        ui.card(title="総得点", content=goals_for_value, key=f"card_gf_{label}").render()
+        ui.card(title="総得点", content=goals_for_value, key=f"card_gf_{label}")
     with cols[2]:
-        ui.card(title="総失点", content=goals_against_value, key=f"card_ga_{label}").render()
+        ui.card(title="総失点", content=goals_against_value, key=f"card_ga_{label}")
     with cols[3]:
-        ui.card(title="得点率", content=scoring_rate_value, description="得点/シュート数", key=f"card_scoring_{label}").render()
+        ui.card(title="得点率", content=scoring_rate_value, description="得点/シュート数", key=f"card_scoring_{label}")
     with cols[4]:
-        ui.card(title="失点率", content=conceding_rate_value, description="失点/被シュート数", key=f"card_conceding_{label}").render()
+        ui.card(title="失点率", content=conceding_rate_value, description="失点/被シュート数", key=f"card_conceding_{label}")
 
 
 render_score_cards(home_team, "ホーム")
@@ -365,7 +365,7 @@ else:
     max_position = int(progress_scoped["position"].max())
     fig.update_yaxes(autorange="reversed", dtick=1, range=[max_position + 0.5, 0.5])
     fig.update_xaxes(dtick=1)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 # ─────────────────────────────────────────
 # チーム別集計結果 (SFRT08データ)
