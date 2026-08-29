@@ -29,6 +29,7 @@ import math
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+import streamlit_shadcn_ui as ui
 from supabase import create_client
 
 # ─────────────────────────────────────────
@@ -240,6 +241,56 @@ st.dataframe(
 )
 
 # ─────────────────────────────────────────
+# メイン: チームサマリー (スコアカード)
+# ─────────────────────────────────────────
+
+st.subheader("チームサマリー")
+
+
+def render_score_cards(team_name: str, label: str):
+    row_standing = scoped[scoped["team"] == team_name]
+    row_stats = stats_df[
+        (stats_df["short_name"] == team_name)
+        & (stats_df["season"] == season)
+        & (stats_df["competition"] == competition)
+    ]
+
+    position_value = "―"
+    goals_for_value = "―"
+    goals_against_value = "―"
+    if not row_standing.empty:
+        r = row_standing.iloc[0]
+        position_value = f"{int(r['position'])}位"
+        goals_for_value = str(int(r["goals_for"]))
+        goals_against_value = str(int(r["goals_against"]))
+
+    scoring_rate_value = "―"
+    conceding_rate_value = "―"
+    if not row_stats.empty:
+        s = row_stats.iloc[0]
+        if pd.notna(s.get("shot_conversion_pct")):
+            scoring_rate_value = f"{s['shot_conversion_pct']:.1f}%"
+        if pd.notna(s.get("opponent_conversion_pct")):
+            conceding_rate_value = f"{s['opponent_conversion_pct']:.1f}%"
+
+    st.markdown(f"**{label}: {team_name}**")
+    cols = st.columns(5)
+    with cols[0]:
+        ui.metric_card(title="現在順位", content=position_value, key=f"card_position_{label}")
+    with cols[1]:
+        ui.metric_card(title="総得点", content=goals_for_value, key=f"card_gf_{label}")
+    with cols[2]:
+        ui.metric_card(title="総失点", content=goals_against_value, key=f"card_ga_{label}")
+    with cols[3]:
+        ui.metric_card(title="得点率", content=scoring_rate_value, description="得点/シュート数", key=f"card_scoring_{label}")
+    with cols[4]:
+        ui.metric_card(title="失点率", content=conceding_rate_value, description="失点/被シュート数", key=f"card_conceding_{label}")
+
+
+render_score_cards(home_team, "ホーム")
+render_score_cards(away_team, "アウェイ")
+
+# ─────────────────────────────────────────
 # メイン: 直近フォーム比較
 # ─────────────────────────────────────────
 
@@ -249,7 +300,6 @@ col_home, col_away = st.columns(2)
 
 
 def render_team_form_panel(container, team_name: str, label: str, is_home: bool):
-    row_standing = scoped[scoped["team"] == team_name]
     row_form = form_df[
         (form_df["team"] == team_name)
         & (form_df["season"] == season)
@@ -264,9 +314,6 @@ def render_team_form_panel(container, team_name: str, label: str, is_home: bool)
 
     with container:
         st.markdown(f"**{label}: {team_name}**")
-        if not row_standing.empty:
-            r = row_standing.iloc[0]
-            st.write(f"順位 {int(r['position'])}位 / 勝点 {int(r['points'])} / 得失点差 {int(r['goal_diff'])}")
         if not row_form.empty:
             f = row_form.iloc[0]
             st.markdown(render_form_badges(f.get("form_string")))
@@ -342,10 +389,6 @@ def render_team_stats_panel(container, team_name: str, label: str):
             s = row_stats.iloc[0]
             st.write(f"試合数: {int(s['played'])}")
             st.write(f"一試合平均得点: {s['avg_goals_per_match']:.2f}")
-            if pd.notna(s["shot_conversion_pct"]):
-                st.write(f"得点率: {s['shot_conversion_pct']:.1f}%")
-            if pd.notna(s["opponent_conversion_pct"]):
-                st.write(f"失点率: {s['opponent_conversion_pct']:.1f}%")
         else:
             st.write("統計データなし")
 
