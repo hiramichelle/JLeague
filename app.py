@@ -156,10 +156,13 @@ if standings_df.empty:
 
 st.sidebar.header("設定")
 
-season = st.sidebar.selectbox("シーズン", sorted(standings_df["season"].unique(), reverse=True))
-competition = st.sidebar.selectbox(
-    "大会", sorted(standings_df[standings_df["season"] == season]["competition"].unique())
-)
+season_options = sorted(standings_df["season"].unique(), reverse=True)
+season = st.sidebar.selectbox("シーズン", season_options)
+
+competition_options = sorted(standings_df[standings_df["season"] == season]["competition"].unique())
+# デフォルトはＪ３をプリセット(存在すれば)
+default_competition_index = competition_options.index("Ｊ３") if "Ｊ３" in competition_options else 0
+competition = st.sidebar.selectbox("大会", competition_options, index=default_competition_index)
 
 # 該当シーズン・大会の試合データを絞り込み
 matches_scoped = jleague_matches[
@@ -171,33 +174,67 @@ if matches_scoped.empty:
     st.error(f"{season} {competition}の試合データがありません")
     st.stop()
 
-# ホームチーム選択(この大会でホームを一度でも務めた全チームが対象)
-home_teams = sorted(matches_scoped["home_team"].unique())
-home_team = st.sidebar.selectbox("ホームチーム", home_teams)
+# チーム選択(ホーム/アウェイ問わず、この大会に出場する全チームが対象)
+all_teams = sorted(
+    set(matches_scoped["home_team"].unique()) | set(matches_scoped["away_team"].unique())
+)
+# デフォルトは相模原をプリセット(存在すれば)
+default_team_index = all_teams.index("相模原") if "相模原" in all_teams else 0
+team = st.sidebar.selectbox("チーム", all_teams, index=default_team_index)
 
-# 選択したチームがホームだった試合に絞り込み
-team_home_matches = matches_scoped[matches_scoped["home_team"] == home_team]
+# 選択したチームが関わる全試合(ホーム/アウェイ両方)
+team_matches = matches_scoped[
+    (matches_scoped["home_team"] == team) | (matches_scoped["away_team"] == team)
+]
 
-if team_home_matches.empty:
+if team_matches.empty:
     st.sidebar.warning("該当試合がありません")
     st.stop()
 
-# 節選択(このチームがホームだった節のみが選択肢になる)
-try:
-    section_list = sorted(team_home_matches["section"].unique())
-except Exception:
-    section_list = sorted(team_home_matches["section"].unique())
+# 対戦相手の一覧(重複無し)
+def _opponent_of(row):
+    return row["away_team"] if row["home_team"] == team else row["home_team"]
 
-section = st.sidebar.selectbox("節", section_list)
+opponents = sorted(team_matches.apply(_opponent_of, axis=1).unique())
+opponent = st.sidebar.selectbox("対戦相手", opponents)
 
-# その節・そのホームチームの試合を特定
-match_row = team_home_matches[team_home_matches["section"] == section]
-if match_row.empty:
+# 選択したチーム×対戦相手の組み合わせの試合(ホーム/アウェイ2試合あることが多い)
+matches_between = team_matches[
+    ((team_matches["home_team"] == team) & (team_matches["away_team"] == opponent))
+    | ((team_matches["home_team"] == opponent) & (team_matches["away_team"] == team))
+].copy()
+
+if matches_between.empty:
     st.sidebar.error("該当試合が見つかりません")
     st.stop()
 
-away_team = match_row.iloc[0]["away_team"]
-st.sidebar.markdown(f"**アウェイ: {away_team}**")
+if len(matches_between) > 1:
+    # 複数試合(ホーム/アウェイ2試合)ある場合は選択させる
+    def _match_label(row):
+        side = "ホーム" if row["home_team"] == team else "アウェイ"
+        status = "消化済み" if row["is_finished"] else "未消化"
+        return f"{row['section']} ({side}・{status})"
+
+    matches_between["_label"] = matches_between.apply(_match_label, axis=1)
+    selected_label = st.sidebar.selectbox("対戦カード", matches_between["_label"].tolist())
+    match_row = matches_between[matches_between["_label"] == selected_label].iloc[0]
+else:
+    match_row = matches_between.iloc[0]
+
+# 選択された試合から実際のホーム/アウェイを確定
+home_team = match_row["home_team"]
+away_team = match_row["away_team"]
+match_section = match_row["section"]
+match_is_finished = bool(match_row["is_finished"])
+
+if match_is_finished:
+    st.sidebar.markdown(f"**{match_section}** で対戦済み")
+    if pd.notna(match_row.get("score")):
+        st.sidebar.write(f"結果: {home_team} {match_row['score']} {away_team}")
+else:
+    st.sidebar.markdown(f"**{match_section}** で対戦予定")
+
+st.sidebar.markdown(f"ホーム: **{home_team}** / アウェイ: **{away_team}**")
 
 st.sidebar.divider()
 st.sidebar.subheader("重み設定")
@@ -226,15 +263,15 @@ st.caption(f"{season}シーズン {competition}")
 
 st.subheader("順位表")
 display_cols = [
-    "position", "team", "played", "points", "wins", "draws", "losses",
-    "goals_for", "goals_against", "goal_diff",
+    "position", "team", "played", "wins", "draws", "losses",
+    "goals_for", "goals_against", "goal_diff", "points",
 ]
 st.dataframe(
     scoped[display_cols].rename(columns={
         "position": "順位", "team": "チーム", "played": "試合数",
-        "points": "勝点","wins": "勝", "draws": "分", "losses": "負",
+        "wins": "勝", "draws": "分", "losses": "負",
         "goals_for": "得点", "goals_against": "失点",
-        "goal_diff": "得失点差",
+        "goal_diff": "得失点差", "points": "勝点",
     }),
     hide_index=True,
     width='stretch',
