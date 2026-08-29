@@ -226,15 +226,15 @@ st.caption(f"{season}シーズン {competition}")
 
 st.subheader("順位表")
 display_cols = [
-    "position", "team", "played", "wins", "draws", "losses",
-    "goals_for", "goals_against", "goal_diff", "points",
+    "position", "team", "played", "points", "wins", "draws", "losses",
+    "goals_for", "goals_against", "goal_diff",
 ]
 st.dataframe(
     scoped[display_cols].rename(columns={
         "position": "順位", "team": "チーム", "played": "試合数",
-        "wins": "勝", "draws": "分", "losses": "負",
+        "points": "勝点","wins": "勝", "draws": "分", "losses": "負",
         "goals_for": "得点", "goals_against": "失点",
-        "goal_diff": "得失点差", "points": "勝点",
+        "goal_diff": "得失点差",
     }),
     hide_index=True,
     width='stretch',
