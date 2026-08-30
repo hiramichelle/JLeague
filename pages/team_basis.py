@@ -100,8 +100,22 @@ def load_jleague_matches() -> pd.DataFrame:
 @st.cache_data(ttl=300)
 def load_section_standings() -> pd.DataFrame:
     client = get_client()
-    res = client.table("team_section_standings").select("*").execute()
-    return pd.DataFrame(res.data)
+    page_size = 1000
+    all_rows: list[dict] = []
+    start = 0
+    while True:
+        res = (
+            client.table("team_section_standings")
+            .select("*")
+            .range(start, start + page_size - 1)
+            .execute()
+        )
+        batch = res.data
+        all_rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        start += page_size
+    return pd.DataFrame(all_rows)
 
 
 FORM_BADGE = {"W": "🟢", "D": "⚪", "L": "🔴"}
