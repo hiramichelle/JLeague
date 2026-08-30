@@ -211,6 +211,13 @@ def upsert_to_supabase(rows: list[dict]) -> None:
         client.table("jleague_matches").upsert(chunk, on_conflict="match_key").execute()
         print(f"Supabaseへupsert: {i + len(chunk)}/{len(rows)}件")
 
+    # 節ごとの順位変動(マテリアライズドビュー)を最新化する。
+    # 都度計算のVIEWだと複数シーズン分のデータでタイムアウトするため、
+    # マテリアライズドビュー化し、データ更新のたびに明示的にリフレッシュする運用にしている。
+    print("team_section_standings 等をリフレッシュ中...")
+    client.rpc("refresh_section_standings").execute()
+    print("リフレッシュ完了。")
+
 
 # ─────────────────────────────────────────
 # エントリポイント
