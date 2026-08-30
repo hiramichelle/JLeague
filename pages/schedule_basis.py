@@ -25,7 +25,7 @@ def get_client():
 @st.cache_data(ttl=300)
 def load_jleague_matches() -> pd.DataFrame:
     client = get_client()
-    res = client.table("jleague_matches").select("*").execute()
+    res = client.table("jleague_matches_normalized").select("*").execute()
     return pd.DataFrame(res.data)
 
 
@@ -62,10 +62,20 @@ if matches_scoped.empty:
     st.error(f"{season} {competition}の試合データがありません")
     st.stop()
 
-section_options = sorted(matches_scoped["section"].unique())
-section = st.sidebar.selectbox("節", section_options)
+section_lookup = (
+    matches_scoped[["section_no", "section_label"]]
+    .dropna(subset=["section_no"])
+    .drop_duplicates()
+    .sort_values("section_no")
+)
+section_label_options = section_lookup["section_label"].tolist()
+selected_section_label = st.sidebar.selectbox("節", section_label_options)
+selected_section_no = section_lookup.loc[
+    section_lookup["section_label"] == selected_section_label, "section_no"
+].iloc[0]
 
-section_matches = matches_scoped[matches_scoped["section"] == section].copy()
+# 節番号でグルーピング(第X節第1日/第2日等の日程分割をまとめて表示)
+section_matches = matches_scoped[matches_scoped["section_no"] == selected_section_no].copy()
 
 # ─────────────────────────────────────────
 # メイン: 節ごとの試合一覧
@@ -74,23 +84,27 @@ section_matches = matches_scoped[matches_scoped["section"] == section].copy()
 st.title("⚽ J-League Data Viewer")
 st.caption(f"{season}シーズン {competition} ／ Schedule Basis")
 
-st.subheader(f"{section} の対戦カード")
+st.subheader(f"{selected_section_label} の対戦カード")
 
 if section_matches.empty:
     st.warning("該当試合がありません")
 else:
-    def _status_and_score(row):
+    def _score_and_attendance(row):
         if row["is_finished"] and pd.notna(row.get("score")):
-            return "消化済み", row["score"]
-        return "未消化", "vs"
+            score = row["score"]
+        else:
+            score = "vs"
+        attendance = row.get("attendance")
+        attendance_display = attendance if row["is_finished"] and pd.notna(attendance) and attendance != "" else "―"
+        return score, attendance_display
 
-    section_matches[["ステータス", "スコア"]] = section_matches.apply(
-        lambda r: pd.Series(_status_and_score(r)), axis=1
+    section_matches[["スコア", "観客数"]] = section_matches.apply(
+        lambda r: pd.Series(_score_and_attendance(r)), axis=1
     )
 
     display_cols = [
         "match_date", "kickoff_time", "home_team", "スコア", "away_team",
-        "stadium", "ステータス",
+        "stadium", "観客数",
     ]
     st.dataframe(
         section_matches[display_cols].rename(columns={
