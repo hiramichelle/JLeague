@@ -79,12 +79,22 @@ def load_team_season_stats() -> pd.DataFrame:
 @st.cache_data(ttl=300)
 def load_jleague_matches() -> pd.DataFrame:
     client = get_client()
-    res = client.table("jleague_matches").select("*").execute()
-    df = pd.DataFrame(res.data)
-    # デバッグ: 列名と最初の行を表示
-    if not df.empty:
-        pass  # 本来はここでデバッグ出力するが、本番環境では不要
-    return df
+    page_size = 1000
+    all_rows: list[dict] = []
+    start = 0
+    while True:
+        res = (
+            client.table("jleague_matches")
+            .select("*")
+            .range(start, start + page_size - 1)
+            .execute()
+        )
+        batch = res.data
+        all_rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        start += page_size
+    return pd.DataFrame(all_rows)
 
 
 @st.cache_data(ttl=300)
