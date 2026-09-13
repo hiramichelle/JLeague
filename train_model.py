@@ -1,7 +1,6 @@
-
 #!/usr/bin/env python3
 """
-J.League 勝敗予測モデル (LightGBM)
+J.League 勝敗予測モデル (Mac完全対応版)
 ===================================================
 Supabaseの特徴量ビュー `v_match_features` から
 過密日程（中何日）と直近5試合調子（勝点・得失点）を取得し、
@@ -27,12 +26,18 @@ except ImportError:
     print("エラー: supabase パッケージがありません。pip install supabase を実行してください。")
     sys.exit(1)
 
+from sklearn.metrics import accuracy_score, log_loss, classification_report
+
+# LightGBMが使えるかチェックし、libompがないMac環境では互換のHistGradientBoostingに自動切り替え
+USE_LGBM = False
 try:
     import lightgbm as lgb
-    from sklearn.metrics import accuracy_score, log_loss, classification_report
-except ImportError:
-    print("エラー: lightgbm または scikit-learn がありません。pip install -r requirements.txt を実行してください。")
-    sys.exit(1)
+    # テスト的に小さなモデルを作って libomp エラーを検知
+    test_clf = lgb.LGBMClassifier(n_estimators=1, verbose=-1)
+    USE_LGBM = True
+except Exception:
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    USE_LGBM = False
 
 
 def fetch_all_match_features() -> pd.DataFrame:
@@ -117,7 +122,7 @@ def prepare_dataset(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def train_and_evaluate(df_train: pd.DataFrame):
-    """時系列分割（過去80%で学習、直近20%で検証）によるLightGBMモデルの訓練"""
+    """時系列分割（過去80%で学習、直近20%で検証）による機械学習モデルの訓練"""
     feature_cols = [
         'home_rest_days',
         'away_rest_days',
@@ -146,18 +151,27 @@ def train_and_evaluate(df_train: pd.DataFrame):
     print(f"  総終了試合数          : {len(df_train)} 試合")
     print(f"  訓練データ（過去80%）  : {len(X_train)} 試合")
     print(f"  検証データ（直近20%）  : {len(X_test)} 試合")
+    print(f"  使用エンジン          : {'LightGBM' if USE_LGBM else 'HistGradientBoosting (Macネイティブ高精度エンジン)'}")
     print(f"=======================================================\n")
 
-    model = lgb.LGBMClassifier(
-        objective='multiclass',
-        num_class=3,
-        n_estimators=100,
-        learning_rate=0.05,
-        max_depth=4,
-        num_leaves=15,
-        random_state=42,
-        verbose=-1
-    )
+    if USE_LGBM:
+        model = lgb.LGBMClassifier(
+            objective='multiclass',
+            num_class=3,
+            n_estimators=100,
+            learning_rate=0.05,
+            max_depth=4,
+            num_leaves=15,
+            random_state=42,
+            verbose=-1
+        )
+    else:
+        model = HistGradientBoostingClassifier(
+            max_iter=100,
+            learning_rate=0.05,
+            max_depth=4,
+            random_state=42
+        )
 
     model.fit(X_train, y_train)
 
@@ -171,16 +185,20 @@ def train_and_evaluate(df_train: pd.DataFrame):
     print(f"  正解率（Accuracy）: {acc * 100:.2f}%")
     print(f"  Log Loss          : {loss:.4f}\n")
 
+    # 特徴量の重要度（順列重要度）
+    from sklearn.inspection import permutation_importance
+    r = permutation_importance(model, X_test, y_test, n_repeats=5, random_state=42)
+    
     print("特徴量の重要度ランキング（勝敗に効いている順）:")
     importance = pd.DataFrame({
         '特徴量': feature_cols,
-        '重要度': model.feature_importances_
+        '重要度': np.maximum(0, r.importances_mean)
     }).sort_values(by='重要度', ascending=False).reset_index(drop=True)
 
     max_imp = max(importance['重要度']) if max(importance['重要度']) > 0 else 1
     for idx, row in importance.iterrows():
         bar = "█" * int(row['重要度'] / max_imp * 20)
-        print(f"  {idx+1:2d}. {row['特徴量']:<24} {bar} ({row['重要度']})")
+        print(f"  {idx+1:2d}. {row['特徴量']:<24} {bar} ({row['重要度']:.4f})")
 
     return model, feature_cols
 
