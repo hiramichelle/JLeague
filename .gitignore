@@ -6,6 +6,7 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+.env
 
 # 取得したローカルJSON(参考用に残す場合は個別に除外解除してもOK)
 *.json

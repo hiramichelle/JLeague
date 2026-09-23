@@ -7,3 +7,4 @@ streamlit-shadcn-ui==1.1.0
 plotly==5.24.1
 lightgbm
 scikit-learn
+python-dotenv
